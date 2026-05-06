@@ -95,21 +95,24 @@ class DocumentProcessor:
         
         return documents
     
-    def process_documents(self, documents: List[str], 
+    def process_documents(self, documents: List[str],
                          metadata: Optional[List[Dict]] = None) -> List[Document]:
         all_chunks = []
-        
+
         for i, doc_text in enumerate(documents):
             chunks = self.text_splitter.split_text(doc_text)
-            
+
             doc_metadata = metadata[i] if metadata and i < len(metadata) else {}
             doc_metadata["doc_index"] = i
-            
+
+            doc_name = doc_metadata.get("name", f"document_{i}")
+
             for j, chunk in enumerate(chunks):
                 chunk_metadata = doc_metadata.copy()
                 chunk_metadata["chunk_index"] = j
+                chunk_metadata["chunk_id"] = f"{doc_name}::{j}"
                 all_chunks.append(Document(page_content=chunk, metadata=chunk_metadata))
-        
+
         return all_chunks
     
     def process_file(self, file_path: str, metadata: Optional[Dict] = None) -> List[Document]:
