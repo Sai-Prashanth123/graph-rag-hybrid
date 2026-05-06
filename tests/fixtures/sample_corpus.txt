@@ -1,0 +1,8 @@
+Alice is a software engineer at Acme Corporation.
+She uses Python and PyTorch for machine learning research.
+
+Bob also works at Acme Corporation as a data scientist.
+He prefers Rust and writes high-performance pipelines.
+
+Acme Corporation is headquartered in Berlin and was founded in 2010.
+The company specializes in distributed systems and AI.
