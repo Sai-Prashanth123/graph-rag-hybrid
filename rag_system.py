@@ -12,6 +12,10 @@ from langchain_core.output_parsers import StrOutputParser
 from config import RAGConfig
 from logger import MySQLLogger
 from document_processor import DocumentProcessor
+from bm25_retriever import BM25Retriever
+from graph_store import GraphStore
+from graph_extractor import GraphExtractor
+from hybrid_retriever import HybridRetriever
 
 
 class DocumentRAGSystem:
@@ -83,22 +87,52 @@ Answer (based on the context above):"""
         )
         
         self.retriever = self.vectorstore.as_retriever(
-            search_kwargs={"k": self.config.TOP_K}
+            search_kwargs={"k": self.config.RETRIEVER_K}
         )
-        
+
+        self.bm25 = None
+        self.graph = None
+        self.graph_extractor = None
+
+        if self.config.BM25_ENABLED:
+            try:
+                self.bm25 = BM25Retriever(self.config)
+                print("✓ BM25 retriever initialized")
+            except Exception as e:
+                print(f"Warning: BM25 disabled ({e})")
+
+        if self.config.GRAPH_ENABLED:
+            try:
+                self.graph = GraphStore(self.config)
+                self.graph_extractor = GraphExtractor(self.llm, self.config)
+                print("✓ Neo4j graph store initialized")
+            except Exception as e:
+                print(f"Warning: graph disabled ({e})")
+                self.graph = None
+                self.graph_extractor = None
+
+        self.hybrid_retriever = HybridRetriever(
+            vector_retriever=self.retriever,
+            bm25_retriever=self.bm25,
+            graph_retriever=self.graph,
+            graph_extractor=self.graph_extractor,
+            config=self.config,
+        )
+        print("✓ Hybrid retriever initialized")
+
         def format_docs(docs):
             return "\n\n".join(doc.page_content for doc in docs)
-        
+
         self.qa_chain = (
             {
-                "context": self.retriever | format_docs,
+                "context": self.hybrid_retriever | format_docs,
                 "question": RunnablePassthrough()
             }
             | PROMPT
             | self.llm
             | StrOutputParser()
         )
-        
+
         print("✓ QA chain initialized")
         print("=" * 50)
     
@@ -122,7 +156,19 @@ Answer (based on the context above):"""
         
         self.vectorstore.add_documents(all_chunks)
         print(f"✓ Added {len(all_chunks)} chunks to vector store")
-    
+
+        if self.bm25:
+            self.bm25.add_documents(all_chunks)
+            print(f"✓ Added {len(all_chunks)} chunks to BM25 index")
+
+        if self.graph:
+            self.graph.add_chunks(all_chunks)
+            print(f"✓ Added {len(all_chunks)} Chunk nodes to Neo4j")
+            if self.graph_extractor:
+                print(f"  Extracting entities for {len(all_chunks)} chunks (this can take a minute)...")
+                self.graph_extractor.extract_and_store(all_chunks, self.graph)
+                print(f"✓ Entity extraction complete")
+
     def add_file(self, file_path: str, metadata: Optional[Dict] = None):
         chunks = self.document_processor.process_file(file_path, metadata)
         
@@ -139,7 +185,15 @@ Answer (based on the context above):"""
         self.logger.log_document(doc_name, doc_type, len(chunks), file_size, file_path)
         self.vectorstore.add_documents(chunks)
         print(f"✓ Added {len(chunks)} chunks from {doc_name} to vector store")
-    
+
+        if self.bm25:
+            self.bm25.add_documents(chunks)
+        if self.graph:
+            self.graph.add_chunks(chunks)
+            if self.graph_extractor:
+                print(f"  Extracting entities for {len(chunks)} chunks…")
+                self.graph_extractor.extract_and_store(chunks, self.graph)
+
     def add_directory(self, directory_path: str, extensions: Optional[List[str]] = None):
         chunks = self.document_processor.process_directory(directory_path, extensions)
         
@@ -158,11 +212,19 @@ Answer (based on the context above):"""
         
         self.vectorstore.add_documents(chunks)
         print(f"✓ Added {len(chunks)} chunks from directory to vector store")
-    
+
+        if self.bm25:
+            self.bm25.add_documents(chunks)
+        if self.graph:
+            self.graph.add_chunks(chunks)
+            if self.graph_extractor:
+                print(f"  Extracting entities for {len(chunks)} chunks…")
+                self.graph_extractor.extract_and_store(chunks, self.graph)
+
     def query(self, question: str, session_id: Optional[str] = None) -> Dict[str, Any]:
         start_time = time.time()
-        
-        source_documents = self.retriever.invoke(question)
+
+        source_documents = self.hybrid_retriever.invoke(question)
         
         if not source_documents or len(source_documents) == 0:
             execution_time = time.time() - start_time
@@ -214,3 +276,8 @@ Answer (based on the context above):"""
     
     def close(self):
         self.logger.close()
+        if self.graph:
+            try:
+                self.graph.close()
+            except Exception as e:
+                print(f"Warning: error closing Neo4j: {e}")
