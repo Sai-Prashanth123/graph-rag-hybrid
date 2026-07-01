@@ -6,10 +6,11 @@ from config import RAGConfig
 
 
 class GraphStore:
-    def __init__(self, config: RAGConfig):
+    def __init__(self, config: RAGConfig, kb_id: str = "default"):
         if not config.NEO4J_URI:
             raise ValueError("NEO4J_URI is empty; cannot connect to Neo4j.")
         self.config = config
+        self.kb_id = kb_id
         self.driver = GraphDatabase.driver(
             config.NEO4J_URI,
             auth=(config.NEO4J_USER, config.NEO4J_PASSWORD),
@@ -31,12 +32,14 @@ class GraphStore:
                     MERGE (c:Chunk {id: $chunk_id})
                     SET c.text = $text,
                         c.doc_name = $doc_name,
-                        c.chunk_index = $chunk_index
+                        c.chunk_index = $chunk_index,
+                        c.kb_id = $kb_id
                     """,
                     chunk_id=d.metadata.get("chunk_id"),
                     text=d.page_content,
                     doc_name=d.metadata.get("name", ""),
                     chunk_index=d.metadata.get("chunk_index", 0),
+                    kb_id=self.kb_id,
                 )
 
     def add_entities(self, triples: Dict[str, Any]) -> None:
@@ -66,10 +69,10 @@ class GraphStore:
                     MERGE (e:Entity {name_lower: toLower($name)})
                     SET e.name = $name, e.type = $type
                     WITH e
-                    MATCH (c:Chunk {id: $chunk_id})
+                    MATCH (c:Chunk {id: $chunk_id, kb_id: $kb_id})
                     MERGE (e)-[:MENTIONED_IN]->(c)
                     """,
-                    name=name, type=etype, chunk_id=chunk_id,
+                    name=name, type=etype, chunk_id=chunk_id, kb_id=self.kb_id,
                 )
 
             for rel in relations:
@@ -101,7 +104,7 @@ class GraphStore:
                OR any(n IN $names WHERE toLower(e.name) CONTAINS n)
             WITH collect(e) AS matched
             UNWIND matched AS e
-            MATCH (e)-[:MENTIONED_IN]->(c:Chunk)
+            MATCH (e)-[:MENTIONED_IN]->(c:Chunk {kb_id: $kb_id})
             RETURN c.id AS id, c.text AS text,
                    c.doc_name AS doc_name, c.chunk_index AS chunk_index,
                    count(*) AS relevance
@@ -115,7 +118,7 @@ class GraphStore:
                OR any(n IN $names WHERE toLower(e.name) CONTAINS n)
             WITH collect(e) AS matched
             UNWIND matched AS e
-            MATCH (e)-[r:RELATION]-(neighbor:Entity)-[:MENTIONED_IN]->(c:Chunk)
+            MATCH (e)-[r:RELATION]-(neighbor:Entity)-[:MENTIONED_IN]->(c:Chunk {kb_id: $kb_id})
             RETURN c.id AS id, c.text AS text,
                    c.doc_name AS doc_name, c.chunk_index AS chunk_index,
                    count(DISTINCT neighbor) AS relevance
@@ -124,7 +127,7 @@ class GraphStore:
             """
 
         with self.driver.session(database=self.config.NEO4J_DATABASE) as session:
-            records = session.run(query, names=names_lower, k=k)
+            records = session.run(query, names=names_lower, k=k, kb_id=self.kb_id)
             results: List[Document] = []
             for r in records:
                 results.append(Document(

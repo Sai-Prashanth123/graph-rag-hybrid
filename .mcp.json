@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "excalidraw": {
+      "type": "http",
+      "url": "https://api.excalidraw.com/api/v1/mcp",
+      "headers": {
+        "Authorization": "Bearer sk-vmd3cst9zgk8_nccmBmwn1gXnLJgT03tyw5hJ6ALxKNoG0VohyZQjoa8carRoJAz"
+      }
+    }
+  }
+}

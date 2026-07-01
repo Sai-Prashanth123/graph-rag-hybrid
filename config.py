@@ -10,6 +10,14 @@ class RAGConfig:
     DEPLOYMENT_NAME = os.getenv("DEPLOYMENT_NAME", "gpt-4o")
     EMBEDDING_DEPLOYMENT = os.getenv("EMBEDDING_DEPLOYMENT", "text-embedding-ada-002")
 
+    # Groq LLM
+    GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
+    GROQ_MODEL: str = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+
+    # HuggingFace embeddings
+    HF_API_KEY: str = os.getenv("HF_API_KEY", "")
+    HF_EMBEDDING_MODEL: str = os.getenv("HF_EMBEDDING_MODEL", "BAAI/bge-large-en-v1.5")
+
     CHROMA_PERSIST_DIR = os.getenv("CHROMA_PERSIST_DIR", "./chroma_db")
     COLLECTION_NAME = os.getenv("COLLECTION_NAME", "document_qa")
 
@@ -46,3 +54,21 @@ class RAGConfig:
     ]
     EXTRACTION_CONCURRENCY = int(os.getenv("EXTRACTION_CONCURRENCY", "5"))
     EXTRACTION_MAX_CHARS = int(os.getenv("EXTRACTION_MAX_CHARS", "4000"))
+
+    # SQLite database path (replaces MySQL for local dev)
+    SQLITE_PATH: str = os.getenv("SQLITE_PATH", "./rag_system.db")
+
+    # Per-KB identifier — set via __init__ overrides
+    KB_ID: str = ""
+
+    def __init__(self, **overrides):
+        # Copy all class-level attributes to instance level first
+        for key, val in vars(RAGConfig).items():
+            if key.startswith('_') or callable(val):
+                continue
+            if isinstance(val, (classmethod, staticmethod, property)):
+                continue
+            setattr(self, key, val)
+        # Apply per-instance overrides
+        for key, val in overrides.items():
+            setattr(self, key, val)
